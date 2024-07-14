@@ -1,9 +1,10 @@
 from datetime import datetime
 from uuid import uuid4
-from fastapi import APIRouter, Body, HTTPException, status
+from fastapi import APIRouter, Body, HTTPException, Query, status
 from pydantic import UUID4
 from sqlalchemy.future import select
 from sqlalchemy.exc import IntegrityError
+from fastapi_pagination import Page, paginate
 
 from workout_api.atleta.models import AtletaModel
 from workout_api.atleta.schemas import AtletaIn, AtletaOut, AtletaUpdate
@@ -65,12 +66,52 @@ async def post(
     '/',
     summary='Consultar todos os atletas',
     status_code=status.HTTP_200_OK,
-    response_model=list[AtletaOut]
+    response_model=Page[AtletaOut]
 )
-async def query(db_session: DatabaseDependency) -> list[AtletaOut]:
-    atletas: list[AtletaOut] = (await db_session.execute(select(AtletaModel))).scalars().all()
+async def query(
+    db_session: DatabaseDependency,
+    nome: str = Query(None),
+    cpf: str = Query(None),
+    limit: int = Query(2, description='Número máximo de itens por página'),
+    offset: int = Query(0, description='Número de itens para pular')
+):
+    query = select(AtletaModel)
+
+    if nome:
+        query = query.where(AtletaModel.nome == nome)
+
+    if cpf:
+        query = query.where(AtletaModel.cpf == cpf)
+
+    atletas = (await db_session.execute(query)).scalars().all()
     
-    return [AtletaOut.model_validate(atleta) for atleta in atletas]
+    return paginate(atletas)
+
+
+@router.get(
+    '/formatted',
+    summary='Consultar todos os atletas com dados formatados',
+    status_code=status.HTTP_200_OK,
+    response_model=list[dict],
+)
+async def get_formatted_atletas(db_session: DatabaseDependency) -> list[dict]:
+    query = select(AtletaModel)
+    atletas = await db_session.execute(query)
+    atletas_dicts = []
+
+    for atleta in atletas.scalars():
+        atleta_dict = {
+            "nome": atleta.nome,
+            "centro_treinamento": {
+                "nome": atleta.centro_treinamento.nome
+            },
+            "categoria": {
+                "nome": atleta.categoria.nome
+            }
+        }
+        atletas_dicts.append(atleta_dict)
+
+    return atletas_dicts
 
 
 @router.get(
